@@ -1,0 +1,227 @@
+using UnityEngine;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine.UIElements;
+using TMPro;
+using static UnityEngine.GraphicsBuffer;
+
+public class GameController : MonoBehaviour
+{
+    [Range(0.1f, 3f)]
+    public float CubeChangePlaceSpeed = 0.5f;
+    [Range(1f, 10f)]
+    public float DefaultRestartTimeOut = 3f;
+    public Transform CubeToPlace; 
+    public GameObject CubeToCreate, AllCubes;
+    public ExplodeCubes ExplodeScript;
+
+    public Cube CurrentCube { get { return _currentCube; } }
+    public bool IsGameOver { get { return _isGameOver; } }
+    public int CountCubes { get { return _countCubes; } }
+
+    private Cube _currentCube;
+    private Rigidbody _allCubesRb;
+    private float _restartTimeOut;
+    private int _countCubes;
+    private bool _isGameOver = false;
+
+    private List<Vector3> _allOccupiedPositions = new List<Vector3>();
+    private List<Vector3> _emptyPositions = new List<Vector3>();
+    private List<Vector3> _defaultPositions = new List<Vector3>()
+    {
+        new Vector3(-1, 0, 0),
+        new Vector3(0, -1, 0),
+        new Vector3(0, 0, -1),
+        new Vector3(1, 0, 0),
+        new Vector3(0, 1, 0),
+        new Vector3(0, 0, 1)
+    };
+
+    IEnumerator ShowCubePlace()
+    {
+        while (_isGameOver == false)
+        {
+            SpawnPositions();
+
+            yield return new WaitForSeconds(CubeChangePlaceSpeed);
+        }
+    }
+
+    private void Start()
+    {
+        _allCubesRb = AllCubes.GetComponent<Rigidbody>();
+        FillAllCubePositions();
+    }
+
+    private void Update()
+    {
+        if (_isGameOver == false)
+        {
+            _restartTimeOut = DefaultRestartTimeOut;
+            TryCreateCube();
+            CheckGameOver();
+        }
+        else
+        {
+            _restartTimeOut -= Time.deltaTime;
+
+            if (_restartTimeOut <= 0 && (AllCubes == null) == false)
+            {
+                ExplodeScript.Explode(AllCubes);
+            }
+        }
+    }
+
+    private void TryCreateCube()
+    {
+        if (Input.touchCount > 0)
+        {
+            if(Input.GetTouch(0).phase == TouchPhase.Began)
+            {
+                GameObject newCube = Instantiate(CubeToCreate, CubeToPlace.position, Quaternion.identity) as GameObject;
+
+                newCube.transform.SetParent(AllCubes.transform);
+                _currentCube.Position = newCube.transform.position;
+
+                _allOccupiedPositions.Add(new Vector3(_currentCube.Position.x, _currentCube.Position.y, _currentCube.Position.z));
+
+                _allCubesRb.WakeUp();
+
+                FoundEmptyPositions(_currentCube.Position);
+                CheckGameOver();
+                SpawnPositions();
+            }
+        }
+    }
+
+    private void CheckGameOver()
+    {
+        if (_allCubesRb.velocity.magnitude > 0.1f || _emptyPositions.Count < 1)
+        {
+            GameOver();
+        }
+    }
+
+    private void GameOver()
+    {
+        _isGameOver = true;
+
+        _countCubes = AllCubes.transform.childCount;
+        _currentCube.Position = new Vector3(0, 1, 0);
+        Destroy(CubeToPlace.gameObject);
+        StopAllCoroutines();
+    }
+
+    private void FillAllCubePositions()
+    {
+        Vector3 center = new Vector3(0, 0, 0);
+
+        Vector3 scalePlatform = GameObject.FindGameObjectWithTag("Platform").transform.localScale;
+        Transform mainCube = GameObject.FindGameObjectWithTag("MainCube").transform;
+
+        int scaleRangeX = GetScaleRange(scalePlatform.x);
+        int scaleRangeY = GetScaleRange(scalePlatform.y);
+        int scaleRangeZ = GetScaleRange(scalePlatform.z);
+
+        for (int x = (int)center.x - scaleRangeX; x <= (int)center.x + scaleRangeX; x++)
+        {
+            for (int y = (int)center.y - scaleRangeY; y <= (int)center.y + scaleRangeY; y++)
+            {
+                for (int z = (int)center.z - scaleRangeZ; z <= (int)center.z + scaleRangeZ; z++)
+                {
+                    _allOccupiedPositions.Add(new Vector3(x, y, z));
+                }
+            }
+        }
+
+        _allOccupiedPositions.Add(mainCube.position);
+
+        FoundEmptyPositions(mainCube.position);
+    }
+
+    private int GetScaleRange(float scale)
+    {
+        if (scale > 1)
+        {
+            return (int)scale / 2;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    private void SpawnPositions()
+    {
+        bool isCorrectPosition = false;
+        int countRepeat = 0;
+
+        while (isCorrectPosition == false)
+        {
+            Vector3 tempPlace = _emptyPositions[UnityEngine.Random.Range(0, _emptyPositions.Count)];
+
+            if (tempPlace == CubeToPlace.position)
+            {
+                isCorrectPosition = false;
+            }
+            else
+            {
+                isCorrectPosition = true;
+                CubeToPlace.position = tempPlace;
+            }
+
+            if (countRepeat > 10)
+            {
+                CheckGameOver();
+                return;
+            }
+            else
+            {
+                countRepeat++;
+            }
+        }
+    }
+
+    private void FoundEmptyPositions(Vector3 currentPosition)
+    {
+        ClearEmptyPositions();
+
+        foreach (var position in _defaultPositions)
+        {
+            Vector3 targetPosition = currentPosition + position;
+
+            TryAddPositions(targetPosition);
+        }
+    }
+
+    private void ClearEmptyPositions()
+    {
+        for (int i = _emptyPositions.Count - 1; i >= 0; i--)
+        {
+            _emptyPositions.RemoveAt(i);
+        }
+
+        _emptyPositions.Clear();
+    }
+
+    private void TryAddPositions(Vector3 targetPosition)
+    {
+        for (int i = 0; i < _allOccupiedPositions.Count; i++)
+        {
+            Vector3 occupiedPosition = _allOccupiedPositions[i];
+
+            if (targetPosition == occupiedPosition || targetPosition.y < 1)
+            {
+                return;
+            }
+        }
+
+        AddEmptyPosition(targetPosition);
+    }
+
+    private void AddEmptyPosition(Vector3 newPosition)
+    {
+        _emptyPositions.Add(newPosition);
+    }
+}
